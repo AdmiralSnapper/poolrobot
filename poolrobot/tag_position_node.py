@@ -36,7 +36,7 @@ class TagPositionNode(Node):
         self.messageCounter = 0
 
         #Final Global Tag Coordinates
-        self.poses = [] 
+        self.relativeTagFrames = [] 
         #ID of tag being used as a reference frame
         self.id_n = 0
 
@@ -49,12 +49,12 @@ class TagPositionNode(Node):
             return
 
         #Get tag detections
-        tags = []
+        rawTagFrames = []
         for t in msg.transforms:
             # Check if the frame represents a tag
             if ':' in t.child_frame_id:
                 # Create a dictionary for this specific tag
-                tag = {
+                frame = {
                     'id': int(t.child_frame_id.split(':')[-1]),
                     'x': t.transform.translation.x,
                     'y': t.transform.translation.y,
@@ -64,23 +64,29 @@ class TagPositionNode(Node):
                     'qz': t.transform.rotation.z,
                     'qw': t.transform.rotation.w
                 }
-                tags.append(tag)
+                rawTagFrames.append(frame)
                 
 
         #If tag list is empty:
-        if len(self.poses) == 0:
+        if len(self.relativeTagFrames) == 0:
             #No tags detected
-            if(len(tags) == 0):
+            if(len(rawTagFrames) == 0):
                 self.get_logger().info("NO TAGS DETECTED")
             #One tag detected, this can be the initial coordinate.
-            elif(len(tags) == 1):
-                self.id_n = tags[0]['id']
+            elif(len(rawTagFrames) == 1):
+                self.id_n = rawTagFrames[0]['id']
                 self.get_logger().info(f"INITIAL TAG FOUND: Tag {self.id_n}")
                 pose = {
                     'id': self.id_n,
-                    'pose': np.eye(4) #Set pose as origin (Identity T matrix).
+                    # 'pose': np.eye(4) #Set pose as origin (Identity T matrix).
+                    'pose': np.array([
+                        [1,0,0,0],
+                        [0,0,-1,0],
+                        [0,1,0,0],
+                        [0,0,0,1],
+                    ])
                 }
-                self.poses.append(pose)
+                self.relativeTagFrames.append(pose)
             #Too many tags detected
             else:
                 self.get_logger().info("TOO MANY TAGS DETECTED, NEEDS ONE ONLY")
@@ -88,9 +94,9 @@ class TagPositionNode(Node):
 
 
         #At least one pose has been stored.      
-        if len(self.poses) > 0:
+        if len(self.relativeTagFrames) > 0:
             #If 2 tags detected and one contains tag with id_n, and check that the tag is not already matching. 
-            if len(tags) == 2 and ({tag['id'] for tag in tags} & {pose['id'] for pose in self.poses}) == {self.id_n}:
+            if len(rawTagFrames) == 2 and ({tag['id'] for tag in rawTagFrames} & {pose['id'] for pose in self.relativeTagFrames}) == {self.id_n}:
                 
                 #Initialise second tag ID
                 id_np1 = 0
@@ -99,19 +105,19 @@ class TagPositionNode(Node):
                 T_np1 = np.zeros(4)
                 
                 #Find second tag ID. The one that isn't tagID_n
-                for tag in tags:
-                    if not tag['id'] == self.id_n:
-                        id_np1 = tag['id']
+                for frame in rawTagFrames:
+                    if not frame['id'] == self.id_n:
+                        id_np1 = frame['id']
 
                 self.get_logger().info(f"TWO TAGS DETECTED, CALCULATING RELATIVE POSE FROM {self.id_n} to {id_np1}")
                 
-                for tag in tags:
+                for frame in rawTagFrames:
                     #Create 4x4 transformation matrix T
-                    T = tf_transformations.quaternion_matrix([tag['qx'], tag['qy'], tag['qz'], tag['qw']])
-                    T[0:3, 3] = [tag['x'], tag['y'], tag['z']]
+                    T = tf_transformations.quaternion_matrix([frame['qx'], frame['qy'], frame['qz'], frame['qw']])
+                    T[0:3, 3] = [frame['x'], frame['y'], frame['z']]
 
                     #Store transformation from camera to tag
-                    if tag['id'] == self.id_n:
+                    if frame['id'] == self.id_n:
                         T_n = T
                     else:
                         T_np1 = T        
@@ -120,11 +126,11 @@ class TagPositionNode(Node):
                 T_n_np1 = np.dot(np.linalg.inv(T_n),T_np1)
 
                 #Create and append a new pose by transforming the previous.
-                newPose = {
+                newRelativeFrame = {
                     'id': id_np1,
-                    'pose': np.dot(self.poses[-1]['pose'], T_n_np1)
+                    'pose': np.dot(self.relativeTagFrames[-1]['pose'], T_n_np1)
                 } 
-                self.poses.append(newPose)
+                self.relativeTagFrames.append(newRelativeFrame)
                 self.get_logger().info(f"ADDED POSE OF TAG: {id_np1}")
 
                 #Set new tag n
@@ -133,21 +139,21 @@ class TagPositionNode(Node):
                 #Publish Poses as array to be read in RViz
                 self.publish_poses_as_array()
                 #Publish Poses as YAML file to be read by robot.
-                self.publish_poses_to_yaml()
+                self.publish_frames_to_yaml()
 
 
             else:
                 self.get_logger().info("LINE UP PREVIOUS TAG WITH NEXT UNKNOWN TAG")
-                self.get_logger().info(f"previously logged tags detected: {({tag['id'] for tag in tags} & {pose['id'] for pose in self.poses})}")
+                self.get_logger().info(f"previously logged tags detected: {({tag['id'] for tag in rawTagFrames} & {pose['id'] for pose in self.relativeTagFrames})}")
 
 
 
     #Publish Poses as YAML file to be read by robot or testing.
-    def publish_poses_to_yaml(self):
+    def publish_frames_to_yaml(self):
         
         tag_data = {}
 
-        for pose in self.poses:
+        for pose in self.relativeTagFrames:
            id = int(pose['id'])
            T = pose['pose']
 
@@ -193,8 +199,8 @@ class TagPositionNode(Node):
         array_msg.header.stamp = self.get_clock().now().to_msg()
         array_msg.header.frame_id = 'camera_link'
 
-        for pose in self.poses:
-            T = pose['pose']
+        for frame in self.relativeTagFrames:
+            T = frame['pose']
             p = Pose()
 
             # 1. Extract position from the matrix translation column
