@@ -11,6 +11,7 @@ import numpy as np
 import rclpy
 import yaml
 import math
+import csv
 import os
 
 
@@ -56,13 +57,23 @@ class TagLocalisationNode(Node):
 
         #Read YAML poses from file in config/
         self.yamlRelativeTagFrames = self.readYAMLFrames()
+        #Get list of tag IDs.
+        self.knownTagIDs = [frame['id'] for frame in self.yamlRelativeTagFrames]
         #Publish YAML poses to RViz
         self.publish_tag_poses()
+
+        #Initialise csv folder for data logging.
+        self.CSVwriter = None
+        self.initialiseCSV()
+
+        #Store Start Time
+        self.startTime = self.get_clock().now()
         
     def tf_callback(self,msg):
 
         #Initialise array of tag poses
         rawTagFrames = []
+        distances = []
         
         #Transform detections into array of poses.
         for t in msg.transforms:
@@ -105,6 +116,7 @@ class TagLocalisationNode(Node):
 
             # math.hypot handles sqrt(x^2 + y^2 + z^2) optimally in C under the hood
             distance = math.hypot(x, y, z)
+            distances.append(distance)
 
             if distance < minDistance:
                 minDistance = distance
@@ -112,6 +124,8 @@ class TagLocalisationNode(Node):
                 minDistancePose = frame['pose']
 
         self.get_logger().info(f"Closest Tag is tag {minDistanceID} at {minDistance} meters")
+
+        self.writeDistancesToCSV(rawTagFrames,distances)
 
         #Calculate Camera Pose from tfposes.
         if len(rawTagFrames) >= 1:
@@ -133,6 +147,59 @@ class TagLocalisationNode(Node):
                 self.publish_camera_pose(Tcam)
             else:
                 self.get_logger().warn(f"Detected tag ID {tag_id} not found in yamlposes!")
+
+    #Initialise .csv file for writing tag detections to.
+    def initialiseCSV(self):
+        # Find path for CSV file: 
+        try:
+            package_dir = get_package_share_directory('poolrobot')
+            # Saves directly into the package's shared configuration space
+            csv_path = os.path.join(package_dir, 'config', 'detections.csv')
+            
+            # Ensure the config directory exists in the installation folder
+            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+        except Exception as e:
+            # Fallback to local execution directory if running outside a ROS 2 launch environment
+            self.get_logger().warn(f"Could not find package directory, saving locally. Error: {e}")
+            csv_path = 'detections.csv'
+
+        #Open file with path and write headers.
+        file = open(csv_path, mode = "w", newline='')
+        formatted_headers = ["Timestamp"] + [f"Tag {tag_id}" for tag_id in self.knownTagIDs]
+        self.CSVwriter = csv.writer(file)
+        self.CSVwriter.writerow(formatted_headers)
+
+    def writeDistancesToCSV(self, rawTagFrames,distances):
+        
+        CSVrow = ["#N/A"] * len(self.knownTagIDs)
+
+        # 1. Calculate the elapsed time since startup in seconds
+        currentTime = self.get_clock().now()
+        elapsed_duration = currentTime - self.startTime
+        # Convert nanoseconds to a clean decimal float of seconds
+        time_msg = elapsed_duration.to_msg()
+        timestamp = time_msg.sec + (time_msg.nanosec / 1e9)
+
+        if (rawTagFrames == [] and distances == []):
+            CSVrow.insert(0,timestamp)
+            self.CSVwriter.writerow(CSVrow)
+            return
+        
+        detectedTagIDs = [frame['id'] for frame in rawTagFrames]
+        
+        for tagID in detectedTagIDs:
+            #Check if tag pose has been stored.
+            if tagID not in self.knownTagIDs:
+                continue
+
+            #Get index in known tags where detected tag is stored.
+            CSVindex = self.knownTagIDs.index(tagID)
+            tagIndex = detectedTagIDs.index(tagID)
+            CSVrow[CSVindex] = distances[tagIndex]
+
+        CSVrow.insert(0,timestamp)
+        self.CSVwriter.writerow(CSVrow)
+
 
     #Publish Camera Pose relative to tags for display in RViz (Only on node startup)
     def publish_camera_pose(self,Tcam):
