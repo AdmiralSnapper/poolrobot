@@ -57,23 +57,25 @@ class TagLocalisationNode(Node):
 
         #Read YAML poses from file in config/
         self.yamlRelativeTagFrames = self.readYAMLFrames()
-        #Get list of tag IDs.
-        self.knownTagIDs = [frame['id'] for frame in self.yamlRelativeTagFrames]
         #Publish YAML poses to RViz
         self.publish_tag_poses()
 
         #Initialise csv folder for data logging.
-        self.CSVwriter = None
-        self.initialiseCSV()
+        self.knownTagIDs = [frame['id'] for frame in self.yamlRelativeTagFrames]
+        headers = ["Timestamp"] + [f"Tag {tag_id}" for tag_id in self.knownTagIDs]
+
+        self.distancesCSVwriter = self.initialiseCSV('distances',headers)
+        self.rotationsCSVwriter = self.initialiseCSV('rotations',headers)
 
         #Store Start Time
         self.startTime = self.get_clock().now()
-        
+
     def tf_callback(self,msg):
 
         #Initialise array of tag poses
         rawTagFrames = []
         distances = []
+        rotations = []
         
         #Transform detections into array of poses.
         for t in msg.transforms:
@@ -123,9 +125,22 @@ class TagLocalisationNode(Node):
                 minDistanceID = frame['id']
                 minDistancePose = frame['pose']
 
-        self.get_logger().info(f"Closest Tag is tag {minDistanceID} at {minDistance} meters")
+        #calculate total rotation of each pose
+        for frame in rawTagFrames:
+            T = frame['pose']
 
-        self.writeDistancesToCSV(rawTagFrames,distances)
+            #Calculate Overall Rotation
+            R = T[0:3,0:3]
+            matrix_trace = np.trace(R)
+            cos_theta = (matrix_trace -1.0)/2.0
+            cos_theta = np.clip(cos_theta, -1.0, 1.0)
+            rotation = np.degrees(np.arccos(cos_theta))
+            
+            rotations.append(rotation)
+            
+
+        self.writeToCSV(rawTagFrames,distances,self.distancesCSVwriter)
+        self.writeToCSV(rawTagFrames,rotations,self.rotationsCSVwriter)
 
         #Calculate Camera Pose from tfposes.
         if len(rawTagFrames) >= 1:
@@ -148,28 +163,29 @@ class TagLocalisationNode(Node):
             else:
                 self.get_logger().warn(f"Detected tag ID {tag_id} not found in yamlposes!")
 
-    #Initialise .csv file for writing tag detections to.
-    def initialiseCSV(self):
+    #Initialise .csv files for writing tag detections
+    def initialiseCSV(self, filename, headers):
         # Find path for CSV file: 
         try:
             package_dir = get_package_share_directory('poolrobot')
             # Saves directly into the package's shared configuration space
-            csv_path = os.path.join(package_dir, 'config', 'detections.csv')
+            csv_path = os.path.join(package_dir, 'config', f'{filename}.csv')
             
             # Ensure the config directory exists in the installation folder
             os.makedirs(os.path.dirname(csv_path), exist_ok=True)
         except Exception as e:
             # Fallback to local execution directory if running outside a ROS 2 launch environment
             self.get_logger().warn(f"Could not find package directory, saving locally. Error: {e}")
-            csv_path = 'detections.csv'
+            csv_path = f'{filename}.csv'
 
         #Open file with path and write headers.
         file = open(csv_path, mode = "w", newline='')
-        formatted_headers = ["Timestamp"] + [f"Tag {tag_id}" for tag_id in self.knownTagIDs]
-        self.CSVwriter = csv.writer(file)
-        self.CSVwriter.writerow(formatted_headers)
+        CSVwriter = csv.writer(file)
+        CSVwriter.writerow(headers)
+        return CSVwriter
 
-    def writeDistancesToCSV(self, rawTagFrames,distances):
+    #Write tag distances at current detection to CSV file. (distances.csv)
+    def writeToCSV(self, rawTagFrames,values,CSVwriter):
         
         CSVrow = ["#N/A"] * len(self.knownTagIDs)
 
@@ -180,9 +196,9 @@ class TagLocalisationNode(Node):
         time_msg = elapsed_duration.to_msg()
         timestamp = time_msg.sec + (time_msg.nanosec / 1e9)
 
-        if (rawTagFrames == [] and distances == []):
+        if (rawTagFrames == [] and values == []):
             CSVrow.insert(0,timestamp)
-            self.CSVwriter.writerow(CSVrow)
+            CSVwriter.writerow(CSVrow)
             return
         
         detectedTagIDs = [frame['id'] for frame in rawTagFrames]
@@ -195,11 +211,10 @@ class TagLocalisationNode(Node):
             #Get index in known tags where detected tag is stored.
             CSVindex = self.knownTagIDs.index(tagID)
             tagIndex = detectedTagIDs.index(tagID)
-            CSVrow[CSVindex] = distances[tagIndex]
+            CSVrow[CSVindex] = values[tagIndex]
 
         CSVrow.insert(0,timestamp)
-        self.CSVwriter.writerow(CSVrow)
-
+        CSVwriter.writerow(CSVrow)
 
     #Publish Camera Pose relative to tags for display in RViz (Only on node startup)
     def publish_camera_pose(self,Tcam):
