@@ -56,16 +56,18 @@ class TagLocalisationNode(Node):
         self.cam_path = Path()
 
         #Read YAML poses from file in config/
-        self.yamlRelativeTagFrames = self.readYAMLFrames()
+        self.yamlRelativeTagFrames = self.initialiseTagFrames()
         #Publish YAML poses to RViz
-        self.publish_tag_poses()
+        self.publishTagPoses()
 
         #Initialise csv folder for data logging.
         self.knownTagIDs = [frame['id'] for frame in self.yamlRelativeTagFrames]
-        headers = ["Timestamp"] + [f"Tag {tag_id}" for tag_id in self.knownTagIDs]
+        tagHeaders = ["Timestamp"] + [f"Tag {tag_id}" for tag_id in self.knownTagIDs]
+        locHeaders = ["Timestamp","x","y","z","roll","pitch","yaw"]
 
-        self.distancesCSVwriter = self.initialiseCSV('distances',headers)
-        self.rotationsCSVwriter = self.initialiseCSV('rotations',headers)
+        self.distancesCSVwriter = self.initialiseCSV('distances',tagHeaders)
+        self.rotationsCSVwriter = self.initialiseCSV('rotations',tagHeaders)
+        self.cameraPoseCSVwriter = self.initialiseCSV('cameraPose',locHeaders)
 
         #Store Start Time
         self.startTime = self.get_clock().now()
@@ -139,8 +141,8 @@ class TagLocalisationNode(Node):
             rotations.append(rotation)
             
 
-        self.writeToCSV(rawTagFrames,distances,self.distancesCSVwriter)
-        self.writeToCSV(rawTagFrames,rotations,self.rotationsCSVwriter)
+        self.writeDistanceOrRotationToCSV(rawTagFrames,distances,self.distancesCSVwriter)
+        self.writeDistanceOrRotationToCSV(rawTagFrames,rotations,self.rotationsCSVwriter)
 
         #Calculate Camera Pose from tfposes.
         if len(rawTagFrames) >= 1:
@@ -158,136 +160,15 @@ class TagLocalisationNode(Node):
                 #Perform the matrix math
                 Tcam = np.dot(Tyaml, np.linalg.inv(Ttf))
                 self.get_logger().info(f"Camera Pose: {Tcam}")
-                #Publish pose to RViz
-                self.publish_camera_pose(Tcam)
+                
+                #Publish and store camera pose.
+                self.publishCameraPose(Tcam)
+                self.writeCameraPoseToCSV(Tcam)
             else:
                 self.get_logger().warn(f"Detected tag ID {tag_id} not found in yamlposes!")
 
-    #Initialise .csv files for writing tag detections
-    def initialiseCSV(self, filename, headers):
-        # Find path for CSV file: 
-        try:
-            package_dir = get_package_share_directory('poolrobot')
-            # Saves directly into the package's shared configuration space
-            csv_path = os.path.join(package_dir, 'config', f'{filename}.csv')
-            
-            # Ensure the config directory exists in the installation folder
-            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-        except Exception as e:
-            # Fallback to local execution directory if running outside a ROS 2 launch environment
-            self.get_logger().warn(f"Could not find package directory, saving locally. Error: {e}")
-            csv_path = f'{filename}.csv'
-
-        #Open file with path and write headers.
-        file = open(csv_path, mode = "w", newline='')
-        CSVwriter = csv.writer(file)
-        CSVwriter.writerow(headers)
-        return CSVwriter
-
-    #Write tag distances at current detection to CSV file. (distances.csv)
-    def writeToCSV(self, rawTagFrames,values,CSVwriter):
-        
-        CSVrow = ["#N/A"] * len(self.knownTagIDs)
-
-        # 1. Calculate the elapsed time since startup in seconds
-        currentTime = self.get_clock().now()
-        elapsed_duration = currentTime - self.startTime
-        # Convert nanoseconds to a clean decimal float of seconds
-        time_msg = elapsed_duration.to_msg()
-        timestamp = time_msg.sec + (time_msg.nanosec / 1e9)
-
-        if (rawTagFrames == [] and values == []):
-            CSVrow.insert(0,timestamp)
-            CSVwriter.writerow(CSVrow)
-            return
-        
-        detectedTagIDs = [frame['id'] for frame in rawTagFrames]
-        
-        for tagID in detectedTagIDs:
-            #Check if tag pose has been stored.
-            if tagID not in self.knownTagIDs:
-                continue
-
-            #Get index in known tags where detected tag is stored.
-            CSVindex = self.knownTagIDs.index(tagID)
-            tagIndex = detectedTagIDs.index(tagID)
-            CSVrow[CSVindex] = values[tagIndex]
-
-        CSVrow.insert(0,timestamp)
-        CSVwriter.writerow(CSVrow)
-
-    #Publish Camera Pose relative to tags for display in RViz (Only on node startup)
-    def publish_camera_pose(self,Tcam):
-        #Initialize the message
-        msg_out = PoseStamped()
-        
-        # Add header metadata (Crucial for TF and tracking)
-        msg_out.header.stamp = self.get_clock().now().to_msg()
-        msg_out.header.frame_id = 'camera_link' 
-        
-        # Extract Translation (Position) from the 4x4 matrix
-        msg_out.pose.position.x = float(Tcam[0, 3])
-        msg_out.pose.position.y = float(Tcam[1, 3])
-        msg_out.pose.position.z = float(Tcam[2, 3])
-        
-        # Extract Rotation (Quaternion) from the 4x4 matrix
-        q = tf_transformations.quaternion_from_matrix(Tcam)
-        msg_out.pose.orientation.x = float(q[0])
-        msg_out.pose.orientation.y = float(q[1])
-        msg_out.pose.orientation.z = float(q[2])
-        msg_out.pose.orientation.w = float(q[3])
-        
-        # Publish 
-        self.cam_pose_publisher.publish(msg_out)
-        self.get_logger().info(f"Published Camera Pose")
-
-
-        #PUBLISH AS PATH
-        # Update the overall path header frame
-        self.cam_path.header = msg_out.header 
-
-        # Append the current camera pose into our history
-        self.cam_path.poses.append(msg_out)
-
-        # Limit the trail size to 500 points to prevent memory bloat
-        if len(self.cam_path.poses) > 500:
-            self.cam_path.poses.pop(0)
-
-        # Publish the history array
-        self.cam_path_publisher.publish(self.cam_path)
-
-    #Publish Tag Poses to be Displayed in RViz (Directly from at_map.yaml).
-    def publish_tag_poses(self):
-        array_msg = PoseArray()
-
-        #Structural Metatdata
-        array_msg.header.stamp = self.get_clock().now().to_msg()
-        array_msg.header.frame_id = 'camera_link'
-
-        for pose in self.yamlRelativeTagFrames:
-            T = pose['pose']
-            p = Pose()
-
-            # 1. Extract position from the matrix translation column
-            p.position.x = float(T[0, 3])
-            p.position.y = float(T[1, 3])
-            p.position.z = float(T[2, 3])
-
-            # 2. Extract rotation quaternion from the matrix
-            q = tf_transformations.quaternion_from_matrix(T)
-            p.orientation.x = q[0]
-            p.orientation.y = q[1]
-            p.orientation.z = q[2]
-            p.orientation.w = q[3]
-
-            # Add this pose to our array list
-            array_msg.poses.append(p)
-
-        # 3. Publish onto your isolated topic name
-        self.tag_pose_publisher.publish(array_msg)
-
-    #Read Tag Poses from at_map.yaml and store in array.
-    def readYAMLFrames(self):
+    #Read Tag frames from at_map.yaml and store in array.
+    def initialiseTagFrames(self):
         self.get_logger().info("Node started! Attempting to read poses...")
         
         # 1. Declare and get the file path string parameter
@@ -331,6 +212,163 @@ class TagLocalisationNode(Node):
 
         return poses
 
+    #Publish Tag frames to be Displayed in RViz (Directly from at_map.yaml).
+    def publishTagPoses(self):
+        array_msg = PoseArray()
+
+        #Structural Metatdata
+        array_msg.header.stamp = self.get_clock().now().to_msg()
+        array_msg.header.frame_id = 'camera_link'
+
+        for pose in self.yamlRelativeTagFrames:
+            T = pose['pose']
+            p = Pose()
+
+            # 1. Extract position from the matrix translation column
+            p.position.x = float(T[0, 3])
+            p.position.y = float(T[1, 3])
+            p.position.z = float(T[2, 3])
+
+            # 2. Extract rotation quaternion from the matrix
+            q = tf_transformations.quaternion_from_matrix(T)
+            p.orientation.x = q[0]
+            p.orientation.y = q[1]
+            p.orientation.z = q[2]
+            p.orientation.w = q[3]
+
+            # Add this pose to our array list
+            array_msg.poses.append(p)
+
+        # 3. Publish onto your isolated topic name
+        self.tag_pose_publisher.publish(array_msg)
+
+    #Initialise .csv files for writing tag detections
+    def initialiseCSV(self, filename, headers):
+        # Find path for CSV file: 
+        try:
+            package_dir = get_package_share_directory('poolrobot')
+            # Saves directly into the package's shared configuration space
+            csv_path = os.path.join(package_dir, 'config', f'{filename}.csv')
+            
+            # Ensure the config directory exists in the installation folder
+            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+        except Exception as e:
+            # Fallback to local execution directory if running outside a ROS 2 launch environment
+            self.get_logger().warn(f"Could not find package directory, saving locally. Error: {e}")
+            csv_path = f'{filename}.csv'
+
+        #Open file with path and write headers.
+        file = open(csv_path, mode = "w", newline='')
+        CSVwriter = csv.writer(file)
+        CSVwriter.writerow(headers)
+        return CSVwriter
+
+    #Write tag distances or rotations to csv.
+    def writeDistanceOrRotationToCSV(self, rawTagFrames,values,CSVwriter):
+        
+        CSVrow = ["#N/A"] * len(self.knownTagIDs)
+
+        timestamp = self.calculateTimestamp()
+
+        if (rawTagFrames == [] and values == []):
+            CSVrow.insert(0,timestamp)
+            CSVwriter.writerow(CSVrow)
+            return
+        
+        detectedTagIDs = [frame['id'] for frame in rawTagFrames]
+        
+        for tagID in detectedTagIDs:
+            #Check if tag pose has been stored.
+            if tagID not in self.knownTagIDs:
+                continue
+
+            #Get index in known tags where detected tag is stored.
+            CSVindex = self.knownTagIDs.index(tagID)
+            tagIndex = detectedTagIDs.index(tagID)
+            CSVrow[CSVindex] = values[tagIndex]
+
+        CSVrow.insert(0,timestamp)
+        CSVwriter.writerow(CSVrow)
+
+    #Write camera localisation to CSV with 6dof.
+    def writeCameraPoseToCSV(self, Tcam):
+
+        # Extract Translation (Position) from the 4x4 matrix
+        x = float(Tcam[0, 3])
+        y = float(Tcam[1, 3])
+        z = float(Tcam[2, 3])
+
+        # 2. Extract Rotation Matrix Elements
+        r00, r10, r20 = Tcam[0, 0], Tcam[1, 0], Tcam[2, 0]
+        r21, r22 = Tcam[2, 1], Tcam[2, 2]
+        
+        # 3. Calculate Euler Angles (Pitch, Roll, Yaw)
+        # Handle gimbal lock safety if pitch is close to +90 or -90 degrees
+        if abs(r20) < 0.99999:
+            pitch = -math.asin(r20)
+            roll = math.atan2(r21, r22)
+            yaw = math.atan2(r10, r00)
+        else:
+            # Gimbal lock occurred (Nose straight up or down)
+            pitch = -math.asin(r20)
+            roll = 0.0  # Force roll to zero
+            yaw = math.atan2(-Tcam[0, 1], Tcam[1, 1])
+
+        timestamp = self.calculateTimestamp()
+
+        CSVrow = [timestamp,x,y,z,roll,pitch,yaw]
+        self.cameraPoseCSVwriter.writerow(CSVrow)
+        
+
+    #Calculate current timestamp in seconds
+    def calculateTimestamp(self):
+        # 1. Calculate the elapsed time since startup in seconds
+        currentTime = self.get_clock().now()
+        elapsed_duration = currentTime - self.startTime
+        # Convert nanoseconds to a clean decimal float of seconds
+        time_msg = elapsed_duration.to_msg()
+        timestamp = time_msg.sec + (time_msg.nanosec / 1e9)
+        return timestamp
+
+    #Publish Camera Pose relative to tags for display in RViz 
+    def publishCameraPose(self,Tcam):
+        #Initialize the message
+        msg_out = PoseStamped()
+        
+        # Add header metadata (Crucial for TF and tracking)
+        msg_out.header.stamp = self.get_clock().now().to_msg()
+        msg_out.header.frame_id = 'camera_link' 
+        
+        # Extract Translation (Position) from the 4x4 matrix
+        msg_out.pose.position.x = float(Tcam[0, 3])
+        msg_out.pose.position.y = float(Tcam[1, 3])
+        msg_out.pose.position.z = float(Tcam[2, 3])
+        
+        # Extract Rotation (Quaternion) from the 4x4 matrix
+        q = tf_transformations.quaternion_from_matrix(Tcam)
+        msg_out.pose.orientation.x = float(q[0])
+        msg_out.pose.orientation.y = float(q[1])
+        msg_out.pose.orientation.z = float(q[2])
+        msg_out.pose.orientation.w = float(q[3])
+        
+        # Publish 
+        self.cam_pose_publisher.publish(msg_out)
+        self.get_logger().info(f"Published Camera Pose")
+
+
+        #PUBLISH AS PATH
+        # Update the overall path header frame
+        self.cam_path.header = msg_out.header 
+
+        # Append the current camera pose into our history
+        self.cam_path.poses.append(msg_out)
+
+        # Limit the trail size to 500 points to prevent memory bloat
+        if len(self.cam_path.poses) > 500:
+            self.cam_path.poses.pop(0)
+
+        # Publish the history array
+        self.cam_path_publisher.publish(self.cam_path)
 
 
 #MAIN FUNCTION ========================================================
