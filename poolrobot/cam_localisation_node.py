@@ -109,46 +109,46 @@ class TagLocalisationNode(Node):
                 self.get_logger().info("appended tag frame")
 
         #Calculate distances of each pose.
-        minDistance = 100
-        minDistanceID = 100
+        minReliability = 100
+        minReliabilityID = 100
         for frame in rawTagFrames:
             T = frame['pose']
 
+            #Calculate overall distance in meters
             x = T[0][3]
             y = T[1][3]
             z = T[2][3]
-
-            # math.hypot handles sqrt(x^2 + y^2 + z^2) optimally in C under the hood
             distance = math.hypot(x, y, z)
-            distances.append(distance)
 
-            if distance < minDistance:
-                minDistance = distance
-                minDistanceID = frame['id']
-                minDistancePose = frame['pose']
-
-        #calculate total rotation of each pose
-        for frame in rawTagFrames:
-            T = frame['pose']
-
-            #Calculate Overall Rotation
+            #Calculate overall rotation in degrees
             R = T[0:3,0:3]
             matrix_trace = np.trace(R)
             cos_theta = (matrix_trace -1.0)/2.0
             cos_theta = np.clip(cos_theta, -1.0, 1.0)
             rotation = np.degrees(np.arccos(cos_theta))
-            
+            rotation = np.abs(rotation - 180)
+
+            #Store distances and rotations of all tags to array
+            distances.append(distance)
             rotations.append(rotation)
+
+            #Determine how reliable the tag is 
+            reliability = np.cos(np.deg2rad(rotation))/(distance*distance)
+
+            if reliability < minReliability:
+                minReliability = reliability
+                minReliabilityID = frame['id']
+                minReliabilityPose = frame['pose']
             
 
         self.writeDistanceOrRotationToCSV(rawTagFrames,distances,self.distancesCSVwriter)
         self.writeDistanceOrRotationToCSV(rawTagFrames,rotations,self.rotationsCSVwriter)
 
-        #Calculate Camera Pose from tfposes.
+        #Calculate Camera Pose
         if len(rawTagFrames) >= 1:
             #Get the detected tag ID and its matrix
-            tag_id = minDistanceID
-            Ttf = minDistancePose
+            tag_id = minReliabilityID
+            Ttf = minReliabilityPose
             
             #Index YAML poses by ID
             frame_lookup = {frame['id']: frame['pose'] for frame in self.yamlRelativeTagFrames}
@@ -319,7 +319,6 @@ class TagLocalisationNode(Node):
         CSVrow = [timestamp,x,y,z,roll,pitch,yaw]
         self.cameraPoseCSVwriter.writerow(CSVrow)
         
-
     #Calculate current timestamp in seconds
     def calculateTimestamp(self):
         # 1. Calculate the elapsed time since startup in seconds
