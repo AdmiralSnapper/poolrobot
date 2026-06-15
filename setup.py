@@ -33,7 +33,8 @@ setup(
     entry_points={
         'console_scripts': [
             'tag_position_node = poolrobot.tag_position_node:main',
-            'cam_localisation_node = poolrobot.cam_localisation_node:main'
+            'cam_localisation_node = poolrobot.cam_localisation_node:main',
+            'cal_checker_node = poolrobot.cal_checker_node:main'
         ],
     },
 )

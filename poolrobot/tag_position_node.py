@@ -40,7 +40,6 @@ class TagPositionNode(Node):
         #ID of tag being used as a reference frame
         self.id_n = 0
 
-
     def tf_callback(self,msg):
         
         #Only read every 100 messages
@@ -146,8 +145,6 @@ class TagPositionNode(Node):
                 self.get_logger().info("LINE UP PREVIOUS TAG WITH NEXT UNKNOWN TAG")
                 self.get_logger().info(f"previously logged tags detected: {({tag['id'] for tag in rawTagFrames} & {pose['id'] for pose in self.relativeTagFrames})}")
 
-
-
     #Publish Poses as YAML file to be read by robot or testing.
     def publish_frames_to_yaml(self):
         
@@ -187,9 +184,6 @@ class TagPositionNode(Node):
             yaml.dump(yaml_data, f, default_flow_style=None, sort_keys=False)
             
         self.get_logger().info(f"Successfully saved AprilTag map to: {yaml_path}")
-
-
-
 
     #Publish Poses to be Displayed in RViz.
     def publish_poses_as_array(self):

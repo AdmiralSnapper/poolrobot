@@ -63,11 +63,11 @@ class TagLocalisationNode(Node):
         #Initialise csv folder for data logging.
         self.knownTagIDs = [frame['id'] for frame in self.yamlRelativeTagFrames]
         tagHeaders = ["Timestamp"] + [f"Tag {tag_id}" for tag_id in self.knownTagIDs]
-        locHeaders = ["Timestamp","x","y","z","roll","pitch","yaw"]
+        poseHeaders = ["Timestamp","x","y","z","qx","qy","qz","qw"]
 
         self.distancesCSVwriter = self.initialiseCSV('distances',tagHeaders)
         self.rotationsCSVwriter = self.initialiseCSV('rotations',tagHeaders)
-        self.cameraPoseCSVwriter = self.initialiseCSV('cameraPose',locHeaders)
+        self.cameraPoseCSVwriter = self.initialiseCSV('cameraPose',poseHeaders)
 
         #Store Start Time
         self.startTime = self.get_clock().now()
@@ -166,6 +166,8 @@ class TagLocalisationNode(Node):
                 self.writeCameraPoseToCSV(Tcam)
             else:
                 self.get_logger().warn(f"Detected tag ID {tag_id} not found in yamlposes!")
+
+    #HELPER FUNCTIONS ==================================================================
 
     #Read Tag frames from at_map.yaml and store in array.
     def initialiseTagFrames(self):
@@ -290,33 +292,11 @@ class TagLocalisationNode(Node):
         CSVrow.insert(0,timestamp)
         CSVwriter.writerow(CSVrow)
 
-    #Write camera localisation to CSV with 6dof.
-    def writeCameraPoseToCSV(self, Tcam):
-
-        # Extract Translation (Position) from the 4x4 matrix
-        x = float(Tcam[0, 3])
-        y = float(Tcam[1, 3])
-        z = float(Tcam[2, 3])
-
-        # 2. Extract Rotation Matrix Elements
-        r00, r10, r20 = Tcam[0, 0], Tcam[1, 0], Tcam[2, 0]
-        r21, r22 = Tcam[2, 1], Tcam[2, 2]
-        
-        # 3. Calculate Euler Angles (Pitch, Roll, Yaw)
-        # Handle gimbal lock safety if pitch is close to +90 or -90 degrees
-        if abs(r20) < 0.99999:
-            pitch = -math.asin(r20)
-            roll = math.atan2(r21, r22)
-            yaw = math.atan2(r10, r00)
-        else:
-            # Gimbal lock occurred (Nose straight up or down)
-            pitch = -math.asin(r20)
-            roll = 0.0  # Force roll to zero
-            yaw = math.atan2(-Tcam[0, 1], Tcam[1, 1])
-
+    #Write camera pose to .csv as quaternion.
+    def writeCameraPoseToCSV(self, T):
+        x,y,z,qx,qy,qz,qw = self.TtoQuaternion(T)
         timestamp = self.calculateTimestamp()
-
-        CSVrow = [timestamp,x,y,z,roll,pitch,yaw]
+        CSVrow = [timestamp, x, y, z, qx, qy, qz, qw]
         self.cameraPoseCSVwriter.writerow(CSVrow)
         
     #Calculate current timestamp in seconds
@@ -369,8 +349,20 @@ class TagLocalisationNode(Node):
         # Publish the history array
         self.cam_path_publisher.publish(self.cam_path)
 
+    #Convert a T matrix to quaternion
+    def TtoQuaternion(self,T):
+        # Extract translation
+        x, y, z = T[0,3], T[1,3], T[2,3]
+        # Extract Rotation (Quaternion) from the 4x4 matrix
+        q = tf_transformations.quaternion_from_matrix(T)
+        qx = float(q[0])
+        qy = float(q[1])
+        qz = float(q[2])
+        qw = float(q[3])
+        return x,y,z,qx,qy,qz,qw
 
-#MAIN FUNCTION ========================================================
+
+#MAIN FUNCTION ======================================================================
 def main(args = None):
     rclpy.init(args = args)
     node = TagLocalisationNode()
