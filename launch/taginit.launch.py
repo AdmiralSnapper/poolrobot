@@ -44,12 +44,12 @@ def generate_launch_description():
             arguments = ['--ros-args', '--log-level', 'error'],
         ),
 
-        # #Run the localization viewer
-        # Node(
-        #     package = 'rviz2',
-        #     executable = 'rviz2',
-        #     name = 'rviz_display',
-        # ),
+        #Run the localization viewer
+        Node(
+            package = 'rviz2',
+            executable = 'rviz2',
+            name = 'rviz_display',
+        ),
 
         #Run my algorithm to count tf.
         Node(
