@@ -57,5 +57,12 @@ def generate_launch_description():
             executable = 'tag_position_node',
             name = 'tag_position'
         ),
+
+        #Run algorithm to send raw image over socket client
+        Node(
+            package = 'poolrobot',
+            executable = 'raw_image_socket_node',
+            name = 'raw_image_socket'
+        )
     ])
 

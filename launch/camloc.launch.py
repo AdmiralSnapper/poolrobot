@@ -59,4 +59,11 @@ def generate_launch_description():
             name = 'cam_localisation',
             parameters=[{'map_path': yaml_file_path}]
         ),
+
+        #Run the raw image socket node to stream images to the PC
+        Node(
+            package = 'poolrobot',
+            executable = 'raw_image_socket_node',
+            name = 'raw_image_socket',
+        )
     ])

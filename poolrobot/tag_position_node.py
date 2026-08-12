@@ -29,7 +29,7 @@ class TagPositionNode(Node):
         )
         self.pose_publisher = self.create_publisher(
             PoseArray,
-            '/my_calculated_poses',
+            '/tag_poses',
             qos_profile
         )
 

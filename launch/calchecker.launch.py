@@ -52,4 +52,11 @@ def generate_launch_description():
             executable = 'cal_checker_node',
             name = 'cal_checker'
         ),
+
+        #Run algorithm to send raw image over socket client
+        Node(
+            package = 'poolrobot',
+            executable = 'raw_image_socket_node',
+            name = 'raw_image_socket'
+        )
     ])

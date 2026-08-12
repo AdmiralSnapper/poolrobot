@@ -34,7 +34,8 @@ setup(
         'console_scripts': [
             'tag_position_node = poolrobot.tag_position_node:main',
             'cam_localisation_node = poolrobot.cam_localisation_node:main',
-            'cal_checker_node = poolrobot.cal_checker_node:main'
+            'cal_checker_node = poolrobot.cal_checker_node:main',
+            'raw_image_socket_node = poolrobot.raw_image_socket_node:main'
         ],
     },
 )
