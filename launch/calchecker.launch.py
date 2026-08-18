@@ -47,8 +47,8 @@ def generate_launch_description():
         #Run the calibration publisher to publish the calibration data
         Node(
             package = 'poolrobot',
-            executable = 'calibration_publisher_node',
-            name = 'calibration_publisher',
+            executable = 'calibrator_node',
+            name = 'calibrator',
             parameters=[{'calyaml_path': calibration_path}]
         ),
 
@@ -62,7 +62,7 @@ def generate_launch_description():
         #Run algorithm to send raw image over socket client
         Node(
             package = 'poolrobot',
-            executable = 'raw_image_socket_node',
-            name = 'raw_image_socket'
+            executable = 'socket_client_node',
+            name = 'socket_client'
         )
     ])

@@ -32,10 +32,10 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'tag_position_node = poolrobot.tag_position_node:main',
+            'tag_initialisation_node = poolrobot.tag_initialisation_node:main',
             'cam_localisation_node = poolrobot.cam_localisation_node:main',
             'cal_checker_node = poolrobot.cal_checker_node:main',
-            'raw_image_socket_node = poolrobot.raw_image_socket_node:main',
+            'socket_client_node = poolrobot.socket_client_node:main',
             'calibrator_node = poolrobot.calibrator_node:main',
         ],
     },

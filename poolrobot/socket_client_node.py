@@ -12,9 +12,9 @@ import json
 MSG_TYPE_IMAGE = 1
 MSG_TYPE_POSE = 2
 
-class MultiSocketSender(Node):
+class SocketClientNode(Node):
     def __init__(self, target_ip='192.168.1.100', target_port=5000):
-        super().__init__('multi_socket_sender')
+        super().__init__('socket_client_node')
         self.bridge = CvBridge()
         self.target_ip = target_ip
         self.target_port = target_port
@@ -91,7 +91,7 @@ class MultiSocketSender(Node):
 def main(args=None):
     rclpy.init(args=args)
     # CHANGE TO YOUR PC/LAPTOP's IP ADDRESS:
-    node = MultiSocketSender(target_ip='172.16.24.125', target_port=5000)
+    node = SocketClientNode(target_ip='172.16.24.125', target_port=5000)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
