@@ -32,7 +32,7 @@ class TagLocalisationNode(Node):
         qos_profile = QoSProfile(
             depth=1,
             history=HistoryPolicy.KEEP_LAST,
-            durability=DurabilityPolicy.TRANSIENT_LOCAL # <-- THIS IS THE CRUCIAL LINE
+            durability=DurabilityPolicy.TRANSIENT_LOCAL 
         )
         self.tag_pose_publisher = self.create_publisher(
             PoseArray,
@@ -109,8 +109,8 @@ class TagLocalisationNode(Node):
                 self.get_logger().info("appended tag frame")
 
         #Calculate distances of each pose.
-        minReliability = 100
-        minReliabilityID = 100
+        maxReliability = -1
+        maxReliabilityID = None
         for frame in rawTagFrames:
             T = frame['pose']
 
@@ -135,10 +135,10 @@ class TagLocalisationNode(Node):
             #Determine how reliable the tag is 
             reliability = np.cos(np.deg2rad(rotation))/(distance*distance)
 
-            if reliability < minReliability:
-                minReliability = reliability
-                minReliabilityID = frame['id']
-                minReliabilityPose = frame['pose']
+            if reliability > maxReliability:
+                maxReliability = reliability
+                maxReliabilityID = frame['id']
+                maxReliabilityPose = frame['pose']
             
 
         self.writeDistanceOrRotationToCSV(rawTagFrames,distances,self.distancesCSVwriter)
@@ -147,8 +147,8 @@ class TagLocalisationNode(Node):
         #Calculate Camera Pose
         if len(rawTagFrames) >= 1:
             #Get the detected tag ID and its matrix
-            tag_id = minReliabilityID
-            Ttf = minReliabilityPose
+            tag_id = maxReliabilityID
+            Ttf = maxReliabilityPose
             
             #Index YAML poses by ID
             frame_lookup = {frame['id']: frame['pose'] for frame in self.yamlRelativeTagFrames}

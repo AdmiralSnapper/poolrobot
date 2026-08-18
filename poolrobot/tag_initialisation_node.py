@@ -9,10 +9,10 @@ import yaml
 import os
 from ament_index_python.packages import get_package_share_directory
 
-class TagPositionNode(Node):
+class TagInitialisationNode(Node):
     
     def __init__(self):
-        super().__init__('tag_position_node')
+        super().__init__('tag_initialisation_node')
 
         #Create subscriber looking for /tf, every time the topic is published tf_callback is called
         self.tf = self.create_subscription(
@@ -221,7 +221,7 @@ class TagPositionNode(Node):
 #MAIN FUNCTION ========================================================
 def main(args = None):
         rclpy.init(args = args)
-        node = TagPositionNode()
+        node = TagInitialisationNode()
         rclpy.spin(node)
         node.destroy_node()
         rclpy.shutdown()

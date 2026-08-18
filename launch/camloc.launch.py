@@ -3,7 +3,6 @@ from launch_ros.actions import Node
 
 import os
 from ament_index_python.packages import get_package_share_directory
-from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
@@ -16,8 +15,10 @@ def generate_launch_description():
 
     #Get directory of poolrobot package
     poolrobot_pkg_dir = get_package_share_directory('poolrobot')
-    #Join the directory of the YAML file and the poolrobot package
-    yaml_file_path = os.path.join(poolrobot_pkg_dir, 'config', 'at_map.yaml')
+    #Join the directory of the tag YAML file and the poolrobot package
+    at_map_path = os.path.join(poolrobot_pkg_dir, 'config', 'at_map.yaml')
+    #Join the directory of the calibration YAML file and the poolrobot package
+    calibration_path = os.path.join(poolrobot_pkg_dir, 'config', 'air_calibration.yaml')
     
     
     included_realsense_launch = IncludeLaunchDescription(
@@ -35,21 +36,22 @@ def generate_launch_description():
             executable = 'apriltag_node',
             name = 'apriltag_processor',
             remappings = [
-                ('/image_rect' , '/camera/camera/color/image_raw'),
-                ('/camera_info', '/camera/camera/color/camera_info'),
+                ('image_rect' , '/my_image_rect'),
+                ('camera_info', '/my_camera_info'),
             ],
             parameters = [{
                 'detector.threads': 1,
-                'size': 0.15,
+                'size': 0.225,
             }],
             arguments = ['--ros-args', '--log-level', 'error'],
         ),
 
-        #Run the localization viewer
+        #Run the calibration publisher to publish the calibration data
         Node(
-            package = 'rviz2',
-            executable = 'rviz2',
-            name = 'rviz_display',
+            package = 'poolrobot',
+            executable = 'calibration_publisher_node',
+            name = 'calibration_publisher',
+            parameters=[{'calyaml_path': calibration_path}]
         ),
 
         #Run my algorithm to localise camera.
@@ -57,7 +59,7 @@ def generate_launch_description():
             package = 'poolrobot',
             executable = 'cam_localisation_node',
             name = 'cam_localisation',
-            parameters=[{'map_path': yaml_file_path}]
+            parameters=[{'map_path': at_map_path}]
         ),
 
         #Run the raw image socket node to stream images to the PC
