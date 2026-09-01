@@ -57,8 +57,8 @@ class TagLocalisationNode(Node):
 
         #Read YAML poses from file in config/
         self.yamlRelativeTagFrames = self.initialiseTagFrames()
-        #Publish YAML poses to RViz
-        self.publishTagPoses()
+        #Publish YAML poses to Socket Client or RViz
+        self.create_timer(1.0, self.publishTagPoses)
 
         #Initialise csv folder for data logging.
         self.knownTagIDs = [frame['id'] for frame in self.yamlRelativeTagFrames]
@@ -216,11 +216,12 @@ class TagLocalisationNode(Node):
 
     #Publish Tag frames to be Displayed in RViz (Directly from at_map.yaml).
     def publishTagPoses(self):
+
         array_msg = PoseArray()
 
         #Structural Metatdata
         array_msg.header.stamp = self.get_clock().now().to_msg()
-        array_msg.header.frame_id = 'camera_link'
+        array_msg.header.frame_id = 'tag_map'
 
         for pose in self.yamlRelativeTagFrames:
             T = pose['pose']

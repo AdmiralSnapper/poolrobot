@@ -1,0 +1,22 @@
+# montage : tube_eau  (genere par calibration_eau.py)
+# 15 vues, RMS 0.7793 px
+image_width: 640
+image_height: 480
+camera_name: realsense_color
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [711.28204841, 0.00000000, 320.75619547, 0.00000000, 595.85847624, 267.37226529, 0.00000000, 0.00000000, 1.00000000]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [0.25503774, 0.43545221, 0.01411297, -0.01478373, -2.02963755]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [711.28204841, 0.00000000, 320.75619547, 0.00000000, 0.00000000, 595.85847624, 267.37226529, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000]

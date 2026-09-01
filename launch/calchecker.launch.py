@@ -39,7 +39,7 @@ def generate_launch_description():
             ],
             parameters = [{
                 'detector.threads': 1,
-                'size': 0.225,
+                'size': 0.1175, #41.87mm, 84, 117.5
             }],
             arguments = ['--ros-args', '--log-level', 'error'],
         ),

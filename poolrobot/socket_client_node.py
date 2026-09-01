@@ -1,97 +1,120 @@
-
-import rclpy
-from rclpy.node import Node
-from sensor_msgs.msg import Image
-from geometry_msgs.msg import PoseStamped
-from cv_bridge import CvBridge
-import cv2
+#!/usr/bin/env python3
+import json
 import socket
 import struct
-import json
+import threading
+
+import cv2
+import rclpy
+from cv_bridge import CvBridge
+from geometry_msgs.msg import PoseArray, PoseStamped
+from rclpy.node import Node
+from sensor_msgs.msg import Image
 
 MSG_TYPE_IMAGE = 1
-MSG_TYPE_POSE = 2
+MSG_TYPE_CAMERA_POSE = 2
+MSG_TYPE_TAG_POSES = 3
 
-class SocketClientNode(Node):
-    def __init__(self, target_ip='192.168.1.100', target_port=5000):
-        super().__init__('socket_client_node')
+
+class MultiSocketSender(Node):
+    def __init__(self):
+        super().__init__('multi_socket_sender')
+
+        self.declare_parameter('server_ip', '172.16.24.125')
+        self.declare_parameter('server_port', 5000)
+        self.declare_parameter('image_topic', '/camera/camera/color/image_raw')
+        self.declare_parameter('camera_pose_topic', '/camera_pose')
+        self.declare_parameter('tag_poses_topic', '/tag_poses')
+        self.declare_parameter('jpeg_quality', 80)
+
         self.bridge = CvBridge()
-        self.target_ip = target_ip
-        self.target_port = target_port
+        self._lock = threading.Lock()
+        self._sock = None
 
-        # Connect socket to PC
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.get_logger().info(f"Connecting to PC at {self.target_ip}:{self.target_port}...")
-        self.sock.connect((self.target_ip, self.target_port))
-        self.get_logger().info("Connected to PC!")
+        ip = self.get_parameter('server_ip').value
+        port = self.get_parameter('server_port').value
+        self.server_addr = (ip, port)
+        self.jpeg_quality = self.get_parameter('jpeg_quality').value
 
-        # Subscribe to Image topic
-        self.sub_image = self.create_subscription(
-            Image,
-            '/camera/camera/color/image_raw',
-            self.image_callback,
-            10
-        )
+        self.create_subscription(
+            Image, self.get_parameter('image_topic').value, self.on_image, 10)
+        self.create_subscription(
+            PoseStamped, self.get_parameter('camera_pose_topic').value,
+            self.on_camera_pose, 10)
+        self.create_subscription(
+            PoseArray, self.get_parameter('tag_poses_topic').value,
+            self.on_tag_poses, 10)
+        self.get_logger().info('Socket sender started.')
 
-        # Subscribe to PoseStamped topic
-        self.sub_pose = self.create_subscription(
-            PoseStamped,
-            '/camera_pose',
-            self.pose_callback,
-            10
-        )
-
-    def send_payload(self, msg_type: int, payload_bytes: bytes):
+    # ---------- socket plumbing ----------
+    def _connect(self):
+        if self._sock is not None:
+            return True
         try:
-            # Header format: 1 byte msg_type + 4 byte uint32 payload size
-            header = struct.pack('>BI', msg_type, len(payload_bytes))
-            self.sock.sendall(header + payload_bytes)
-        except Exception as e:
-            self.get_logger().error(f"Failed to send socket message: {e}")
+            self._sock = socket.create_connection(self.server_addr, timeout=2.0)
+            self.get_logger().info(f'Connected to {self.server_addr}')
+            return True
+        except OSError:
+            self._sock = None
+            return False
 
-    def image_callback(self, msg: Image):
+    def _send(self, msg_type, payload):
+        try:
+            if not self._connect():
+                return
+            with self._lock:
+                self._sock.sendall(
+                    struct.pack('>BI', msg_type, len(payload)) + payload)
+        except OSError as e:
+            self.get_logger().warn(f'Socket error: {e}; reconnecting...')
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+
+    # ---------- subscribers ----------
+    def on_image(self, msg):
         try:
             cv_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            success, encoded_img = cv2.imencode('.jpg', cv_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-            if success:
-                self.send_payload(MSG_TYPE_IMAGE, encoded_img.tobytes())
+            ok, jpg = cv2.imencode(
+                '.jpg', cv_img,
+                [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
+            if ok:
+                self._send(MSG_TYPE_IMAGE, jpg.tobytes())
         except Exception as e:
-            self.get_logger().error(f"Error encoding image: {e}")
+            self.get_logger().warn(f'Image encode failed: {e}')
 
-    def pose_callback(self, msg: PoseStamped):
-        try:
-            pose_dict = {
-                'frame_id': msg.header.frame_id,
-                'sec': msg.header.stamp.sec,
-                'nanosec': msg.header.stamp.nanosec,
-                'position': {
-                    'x': msg.pose.position.x,
-                    'y': msg.pose.position.y,
-                    'z': msg.pose.position.z
-                },
-                'orientation': {
-                    'x': msg.pose.orientation.x,
-                    'y': msg.pose.orientation.y,
-                    'z': msg.pose.orientation.z,
-                    'w': msg.pose.orientation.w
-                }
-            }
-            json_bytes = json.dumps(pose_dict).encode('utf-8')
-            self.send_payload(MSG_TYPE_POSE, json_bytes)
-        except Exception as e:
-            self.get_logger().error(f"Error serialization pose: {e}")
+    def on_camera_pose(self, msg):
+        data = {
+            'frame_id': msg.header.frame_id,
+            'stamp_ns': msg.header.stamp.sec * 10**9 + msg.header.stamp.nanosec,
+            'position': [msg.pose.position.x,
+                         msg.pose.position.y,
+                         msg.pose.position.z],
+            'quaternion': [msg.pose.orientation.x,
+                           msg.pose.orientation.y,
+                           msg.pose.orientation.z,
+                           msg.pose.orientation.w],
+        }
+        self._send(MSG_TYPE_CAMERA_POSE, json.dumps(data).encode())
 
-    def destroy_node(self):
-        try:
-            self.sock.close()
-        except:
-            pass
-        super().destroy_node()
+    def on_tag_poses(self, msg):
+        poses = []
+        for i, p in enumerate(msg.poses):
+            poses.append({
+                'id': i,
+                'position': [p.position.x, p.position.y, p.position.z],
+                'quaternion': [p.orientation.x, p.orientation.y,
+                               p.orientation.z, p.orientation.w],
+            })
+        data = {'frame_id': msg.header.frame_id, 'poses': poses}
+        self._send(MSG_TYPE_TAG_POSES, json.dumps(data).encode())
+
 
 def main(args=None):
     rclpy.init(args=args)
-    # CHANGE TO YOUR PC/LAPTOP's IP ADDRESS:
-    node = SocketClientNode(target_ip='172.16.24.125', target_port=5000)
+    node = MultiSocketSender()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
@@ -99,6 +122,7 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()

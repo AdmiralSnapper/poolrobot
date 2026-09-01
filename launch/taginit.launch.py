@@ -17,7 +17,7 @@ def generate_launch_description():
     #Get directory of poolrobot package
     poolrobot_pkg_dir = get_package_share_directory('poolrobot')
     #Join the directory of the calibration YAML file and the poolrobot package
-    air_calibration_path = os.path.join(poolrobot_pkg_dir, 'config', 'air_calibration.yaml')
+    air_calibration_path = os.path.join(poolrobot_pkg_dir, 'config', 'water_calibration.yaml')
     
     included_realsense_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(realsense_launch_path),
@@ -44,7 +44,8 @@ def generate_launch_description():
             ],
             parameters = [{
                 'detector.threads': 1,
-                'size': 0.225,
+                'size': 0.1175,
+                #41.87mm, 84, 117.5
             }],
             arguments = ['--ros-args', '--log-level', 'error'],
         ),
